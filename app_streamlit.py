@@ -128,24 +128,27 @@ def lookup_costo_envio(rango_peso, rango_envio):
 
 # --- LÓGICA DE RENTABILIDAD ---------------------------------------------------
 
-def calcular_rentabilidad(producto, precio_sim, pct_cuotas):
+def calcular_rentabilidad(producto, precio_sim, pct_cuotas, incluir_envio: bool):
     """
     precio_sim: precio final simulado, YA incluye IVA.
     iva_venta (iva_tasa) es la tasa (por ejemplo 0.21 para 21%).
     Se descompone precio_sim en base imponible + IVA.
+
+    incluir_envio:
+    - True  -> se calcula costo de envio según rangos.
+    - False -> costo de envio = 0 (no se descuenta en la simulacion).
     """
     costo_fijo   = float(producto.get("costo_fijo_ecom") or 0)
     pct_venta    = float(producto.get("pct_costo_venta") or 0)
     iva_tasa     = float(producto.get("iva_venta") or 0)
     rango_peso   = producto.get("rango_peso_facturable")
-    envio_gratis = producto.get("envio_gratis")
 
     # Rangos dinámicos según precio_sim
     rango_envio = clasificar_rango_envio(precio_sim)
     rango_und   = clasificar_rango_und(precio_sim)
 
-    # Costo envío: solo si envio_gratis = True
-    if envio_gratis:
+    # Costo envío según flag incluir_envio
+    if incluir_envio:
         costo_envio_sim = lookup_costo_envio(rango_peso, rango_envio)
     else:
         costo_envio_sim = 0.0
@@ -165,7 +168,7 @@ def calcular_rentabilidad(producto, precio_sim, pct_cuotas):
         base_imponible = precio_sim / factor_iva
         valor_iva_sim = precio_sim - base_imponible
 
-    # Costos variables calculados sobre el precio final (si así está definido)
+    # Costos variables calculados sobre el precio final
     costo_cuotas_sim = pct_cuotas * precio_sim
     costo_venta_var  = pct_venta  * precio_sim
     costo_venta_sim  = costo_cuotas_sim + costo_venta_var + costo_und_sim
@@ -194,12 +197,12 @@ def calcular_rentabilidad(producto, precio_sim, pct_cuotas):
         "rango_und_sim":           rango_und,
     }
 
-def simular_escenario_2(producto, pct_obj, pct_cuotas):
+def simular_escenario_2(producto, pct_obj, pct_cuotas, incluir_envio: bool):
     costo_fijo = float(producto.get("costo_fijo_ecom") or 0)
     rent_obj   = (pct_obj / 100) * costo_fijo
 
     def f(p):
-        r = calcular_rentabilidad(producto, p, pct_cuotas)
+        r = calcular_rentabilidad(producto, p, pct_cuotas, incluir_envio)
         return r["rentabilidad_sim"] - rent_obj
 
     p_min = costo_fijo
@@ -267,7 +270,6 @@ def mostrar_comparativo(producto, sim, escenario="1", nombre_campania=""):
             </div>
             """, unsafe_allow_html=True)
 
-        # bloque tipo tabla, todo dentro de un único div (sin cuadro vacío)
         html_actual = f"""
         <div style="{card_style}">
           <table style="width:100%;font-size:0.9rem;">
@@ -608,6 +610,7 @@ if st.session_state.resultados is not None:
 
             col_e1, col_e2 = st.columns(2)
 
+            # ── ESCENARIO 1 ---------------------------------------------------
             with col_e1:
                 st.markdown("**Escenario 1: Cambio de precio**")
                 with st.form(key="form_e1"):
@@ -619,6 +622,11 @@ if st.session_state.resultados is not None:
                         "Campaign ofrecida",
                         list(CAMPAIGN_CUOTAS.keys())
                     )
+                    envio_e1 = st.selectbox(
+                        "Envio gratis (simulacion)",
+                        ["Si", "No"],
+                        index=0
+                    )
                     simular_e1 = st.form_submit_button("Simular Escenario 1", use_container_width=True)
 
                 if simular_e1:
@@ -628,10 +636,12 @@ if st.session_state.resultados is not None:
                         st.session_state["sim_e1_params"] = {
                             "precio":        nuevo_precio_global,
                             "campaign":      campaign_global,
+                            "envio":         envio_e1,
                             "seleccionados": list(st.session_state.seleccionados)
                         }
                         st.session_state.pop("sim_e2_params", None)
 
+            # ── ESCENARIO 2 ---------------------------------------------------
             with col_e2:
                 st.markdown("**Escenario 2: Rentabilidad objetivo**")
                 with st.form(key="form_e2"):
@@ -644,12 +654,18 @@ if st.session_state.resultados is not None:
                         "Campaign ofrecida",
                         list(CAMPAIGN_CUOTAS.keys())
                     )
+                    envio_e2 = st.selectbox(
+                        "Envio gratis (simulacion)",
+                        ["Si", "No"],
+                        index=0
+                    )
                     simular_e2 = st.form_submit_button("Simular Escenario 2", use_container_width=True)
 
                 if simular_e2:
                     st.session_state["sim_e2_params"] = {
                         "pct_obj":       pct_obj_global,
                         "campaign":      campaign_global_e2,
+                        "envio":         envio_e2,
                         "seleccionados": list(st.session_state.seleccionados)
                     }
                     st.session_state.pop("sim_e1_params", None)
@@ -659,6 +675,7 @@ if st.session_state.resultados is not None:
                 p = st.session_state["sim_e1_params"]
                 st.markdown("### Resultados Escenario 1")
                 pct_cuotas = CAMPAIGN_CUOTAS[p["campaign"]]
+                incluir_envio = (p["envio"] == "Si")
                 for ml_id in p["seleccionados"]:
                     producto = fetch_one(
                         "SELECT * FROM rd_tabla_rentas WHERE CAST(ml_id AS TEXT) = %s",
@@ -666,7 +683,7 @@ if st.session_state.resultados is not None:
                     )
                     if not producto:
                         continue
-                    sim = calcular_rentabilidad(producto, p["precio"], pct_cuotas)
+                    sim = calcular_rentabilidad(producto, p["precio"], pct_cuotas, incluir_envio)
                     with st.expander(f"{producto['titulo_ecom']} | ML: {ml_id}", expanded=True):
                         mostrar_comparativo(producto, sim, escenario="1", nombre_campania=p["campaign"])
 
@@ -675,6 +692,7 @@ if st.session_state.resultados is not None:
                 p = st.session_state["sim_e2_params"]
                 st.markdown("### Resultados Escenario 2")
                 pct_cuotas2 = CAMPAIGN_CUOTAS[p["campaign"]]
+                incluir_envio2 = (p["envio"] == "Si")
                 for ml_id in p["seleccionados"]:
                     producto = fetch_one(
                         "SELECT * FROM rd_tabla_rentas WHERE CAST(ml_id AS TEXT) = %s",
@@ -682,8 +700,8 @@ if st.session_state.resultados is not None:
                     )
                     if not producto:
                         continue
-                    precio_sug = simular_escenario_2(producto, p["pct_obj"], pct_cuotas2)
-                    sim2       = calcular_rentabilidad(producto, precio_sug, pct_cuotas2)
+                    precio_sug = simular_escenario_2(producto, p["pct_obj"], pct_cuotas2, incluir_envio2)
+                    sim2       = calcular_rentabilidad(producto, precio_sug, pct_cuotas2, incluir_envio2)
                     with st.expander(f"{producto['titulo_ecom']} | ML: {ml_id}", expanded=True):
                         st.markdown(f"**Precio sugerido para {p['pct_obj']:.1f}% de rentabilidad: {fmt(precio_sug)}**")
                         mostrar_comparativo(producto, sim2, escenario="2", nombre_campania=p["campaign"])
