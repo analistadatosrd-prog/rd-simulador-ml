@@ -127,7 +127,7 @@ def lookup_costo_envio(rango_peso, rango_envio):
 
 # ───────────────────────── LÓGICA DE RENTABILIDAD ───────────────────────────
 def calcular_rentabilidad(producto, precio_sim, pct_cuotas, incluir_envio: bool):
-    costo_fijo   = float(producto.get("costo_fijo_ecom") or 0)
+    costo_fijo   = float(producto.get("costo_fijo_ecom") or 0)  # ya es el final (nuevo si hay)
     pct_venta    = float(producto.get("pct_costo_venta") or 0)
     iva_tasa     = float(producto.get("iva_venta") or 0)
     rango_peso   = producto.get("rango_peso_facturable")
@@ -259,8 +259,12 @@ def mostrar_comparativo(producto, sim, escenario="1", nombre_campania=""):
         <div style="{card_style}">
           <table style="width:100%;font-size:0.9rem;">
             <tr>
-              <td>Costo fijo:</td><td>{fmt(producto.get('costo_fijo_ecom'))}</td>
+              <td>Costo fijo (final):</td><td>{fmt(producto.get('costo_fijo_ecom'))}</td>
               <td>Costo venta:</td><td>{fmt(producto.get('costo_venta'))}</td>
+            </tr>
+            <tr>
+              <td>Costo fijo antiguo:</td><td>{fmt(producto.get('costo_fijo_ecom_antiguo'))}</td>
+              <td>Costo fijo nuevo:</td><td>{fmt(producto.get('costo_fijo_ecom_nuevo'))}</td>
             </tr>
             <tr>
               <td>Costo envio:</td><td>{fmt(producto.get('costo_envio'))}</td>
@@ -425,7 +429,6 @@ if btn_consultar:
     EST_MAX_PAGES = 200  # máximo estimado para normalizar 0–100 %
 
     def status_callback(msg: str):
-        # Mensajes tipo: "Consultando mlListings - página X..."
         if "mlListings - página" in msg:
             try:
                 num = int(msg.split("página")[1].split("...")[0].strip())
@@ -444,14 +447,25 @@ if btn_consultar:
 
         if resultados_pg:
             df_pg = pd.DataFrame(resultados_pg)
+
+            # Guardar costo fijo original de Postgres
+            df_pg["costo_fijo_ecom_antiguo"] = df_pg["costo_fijo_ecom"]
+
+            # Costo nuevo desde Ecom (costo_total_mla)
             df_costos = final_costos[["mla", "costo_total_mla"]].rename(
                 columns={"mla": "ml_id", "costo_total_mla": "costo_fijo_ecom_nuevo"}
             )
+
             df_pg["ml_id"] = df_pg["ml_id"].astype(str)
             df_costos["ml_id"] = df_costos["ml_id"].astype(str)
+
             df_merged = df_pg.merge(df_costos, on="ml_id", how="left")
-            df_merged["costo_fijo_ecom_efectivo"] = df_merged["costo_fijo_ecom_nuevo"].fillna(df_merged["costo_fijo_ecom"])
-            df_merged["costo_fijo_ecom"] = df_merged["costo_fijo_ecom_efectivo"]
+
+            # Costo final que usará la app: nuevo si existe, si no el antiguo
+            df_merged["costo_fijo_ecom"] = df_merged["costo_fijo_ecom_nuevo"].fillna(
+                df_merged["costo_fijo_ecom_antiguo"]
+            )
+
             st.session_state.df_base = df_merged.copy()
             st.session_state.df_filtrado = df_merged.copy()
             st.session_state.seleccionados = []
@@ -521,6 +535,8 @@ if not df_vista.empty:
         "precio_venta_final",
         "precio_venta_base",
         "costo_fijo_ecom",
+        "costo_fijo_ecom_antiguo",
+        "costo_fijo_ecom_nuevo",
         "costo_envio",
         "costo_und_vendida",
         "costo_venta",
