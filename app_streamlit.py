@@ -5,6 +5,7 @@ import pandas as pd
 from passlib.context import CryptContext
 
 from login_streamlit import login_ecom
+from ecom_client import fetch_ml_listings_fast, fetch_products_fast, build_outputs
 
 st.set_page_config(
     page_title="RD Simulador - Mercado Libre",
@@ -148,6 +149,7 @@ def calcular_rentabilidad(producto, precio_sim, pct_cuotas, incluir_envio: bool)
     - True  -> se calcula costo de envio según rangos.
     - False -> costo de envio = 0 (no se descuenta en la simulacion).
     """
+    # Usa siempre el costo_fijo_ecom ya actualizado en memoria
     costo_fijo   = float(producto.get("costo_fijo_ecom") or 0)
     pct_venta    = float(producto.get("pct_costo_venta") or 0)
     iva_tasa     = float(producto.get("iva_venta") or 0)
@@ -383,7 +385,11 @@ def mostrar_comparativo(producto, sim, escenario="1", nombre_campania=""):
             st.error(f"📉 Variacion % Rentabilidad: {diff_pct:.2f}%")
 
 
-# ───────────────────────── SESSION STATE BASE ────────────────────────────────
+# ───────────────────────── HELPERS DE ESTADO ─────────────────────────────────
+def update_status(msg: str):
+    st.caption(msg)
+
+
 for key, default in [
     ("resultados", None),
     ("seleccionados", []),
@@ -400,7 +406,6 @@ if not st.session_state.get("authenticated"):
 
 # ───────────────────────── APP PRINCIPAL ─────────────────────────────────────
 st.markdown("### RD Simulador | Usuario autenticado via EcomExperts")
-
 st.markdown("---")
 
 # ── OPCIONES LISTAS ───────────────────────────────────────────────────────────
@@ -440,7 +445,21 @@ with col_bus:
 with col_lim:
     limite = st.selectbox("Limite de resultados", options=[50, 100, 200, 300, 500], index=2)
 
+# ── BOTÓN BUSCAR: ECOM + POSTGRES ────────────────────────────────────────────
 if buscar:
+    # 1) Traer costos frescos desde EcomExperts
+    session = st.session_state.get("ecom_session")
+    if session is None:
+        st.error("La sesión de EcomExperts no es válida. Vuelve a iniciar sesión.")
+        st.stop()
+
+    with st.spinner("Actualizando costos desde EcomExperts..."):
+        df_listings = fetch_ml_listings_fast(session, update_status)
+        update_status("Consultando catálogo de productos...")
+        df_products = fetch_products_fast(session, update_status)
+        detalle_costos, final_costos = build_outputs(df_listings, df_products, update_status)
+
+    # 2) Construir query a Postgres con filtros
     conditions = []
     params     = []
 
@@ -479,10 +498,33 @@ if buscar:
         " ORDER BY titulo_ecom LIMIT %s"
     )
 
-    st.session_state.resultados    = fetch_all(query, tuple(params))
-    st.session_state.seleccionados = []
-    st.session_state.pop("sim_e1_params", None)
-    st.session_state.pop("sim_e2_params", None)
+    resultados_pg = fetch_all(query, tuple(params))
+
+    if not resultados_pg:
+        st.session_state.resultados = []
+        st.session_state.seleccionados = []
+        st.warning("No se encontraron publicaciones con esos filtros")
+    else:
+        # 3) Fusionar Postgres con costos Ecom
+        df_pg = pd.DataFrame(resultados_pg)
+
+        df_costos = final_costos[["mla", "costo_total_mla"]].rename(
+            columns={"mla": "ml_id", "costo_total_mla": "costo_fijo_ecom_nuevo"}
+        )
+
+        df_pg["ml_id"] = df_pg["ml_id"].astype(str)
+        df_costos["ml_id"] = df_costos["ml_id"].astype(str)
+
+        df_merged = df_pg.merge(df_costos, on="ml_id", how="left")
+
+        # costo_fijo_ecom efectivo = costo_total_mla (si existe) o el que ya traía Postgres
+        df_merged["costo_fijo_ecom_efectivo"] = df_merged["costo_fijo_ecom_nuevo"].fillna(df_merged["costo_fijo_ecom"])
+        df_merged["costo_fijo_ecom"] = df_merged["costo_fijo_ecom_efectivo"]
+
+        st.session_state.resultados    = df_merged.to_dict(orient="records")
+        st.session_state.seleccionados = []
+        st.session_state.pop("sim_e1_params", None)
+        st.session_state.pop("sim_e2_params", None)
 
 # ── TABLA RESULTADOS ──────────────────────────────────────────────────────────
 if st.session_state.resultados is not None:
@@ -639,9 +681,9 @@ if st.session_state.resultados is not None:
                 pct_cuotas = CAMPAIGN_CUOTAS[p["campaign"]]
                 incluir_envio = (p["envio"] == "Si")
                 for ml_id in p["seleccionados"]:
-                    producto = fetch_one(
-                        "SELECT * FROM rd_tabla_rentas WHERE CAST(ml_id AS TEXT) = %s",
-                        (ml_id,)
+                    producto = next(
+                        (r for r in st.session_state.resultados if str(r["ml_id"]) == str(ml_id)),
+                        None
                     )
                     if not producto:
                         continue
@@ -656,9 +698,9 @@ if st.session_state.resultados is not None:
                 pct_cuotas2 = CAMPAIGN_CUOTAS[p["campaign"]]
                 incluir_envio2 = (p["envio"] == "Si")
                 for ml_id in p["seleccionados"]:
-                    producto = fetch_one(
-                        "SELECT * FROM rd_tabla_rentas WHERE CAST(ml_id AS TEXT) = %s",
-                        (ml_id,)
+                    producto = next(
+                        (r for r in st.session_state.resultados if str(r["ml_id"]) == str(ml_id)),
+                        None
                     )
                     if not producto:
                         continue
