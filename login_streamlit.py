@@ -1,57 +1,36 @@
-import os
-import psycopg2
-from psycopg2.extras import RealDictCursor
-from dotenv import load_dotenv
 import streamlit as st
+from ecom_client import login_session
 
-load_dotenv()
+def login_ecom():
+    st.title("RD Simulador - Acceso EcomExperts")
+    email = st.text_input("Correo EcomExperts")
+    password = st.text_input("Contraseña EcomExperts", type="password")
 
-def get_connection():
-    conn = psycopg2.connect(
-        host=os.getenv("PGHOST"),
-        port=os.getenv("PGPORT"),
-        dbname=os.getenv("PGDATABASE"),
-        user=os.getenv("PGUSER"),
-        password=os.getenv("PGPASSWORD"),
-        sslmode=os.getenv("PGSSLMODE", "require"),
-    )
-    return conn
+    col1, col2 = st.columns(2)
+    with col1:
+        login_clicked = st.button("Ingresar", use_container_width=True)
+    with col2:
+        logout_clicked = st.button("Salir", use_container_width=True)
 
-def check_user(username, password_plain):
-    query = """
-        SELECT id, username, password_hash, role
-        FROM rd_usuarios
-        WHERE username = %s
-    """
-    with get_connection() as conn:
-        with conn.cursor(cursor_factory=RealDictCursor) as cur:
-            cur.execute(query, (username,))
-            row = cur.fetchone()
-            if not row:
-                return None
-            if password_plain != row["password_hash"]:
-                return None
-            return row
+    if logout_clicked:
+        for k in ["authenticated", "ecom_session", "ecom_email"]:
+            if k in st.session_state:
+                st.session_state.pop(k)
+        st.rerun()
 
-def main():
-    st.set_page_config(page_title="Login RD Simulador", page_icon="🔐", layout="centered")
-
-    st.title("Simulador Rentabilidad Mercado Libre - Login")
-
-    username = st.text_input("Usuario")
-    password = st.text_input("Contraseña", type="password")
-
-    if st.button("Ingresar"):
-        user = check_user(username, password)
-        if user:
-            st.session_state["usuario"] = {
-                "id": user["id"],
-                "username": user["username"],
-                "role": user["role"],
-            }
-            st.success("Login exitoso. Luego ejecuta app_streamlit.py para usar el simulador.")
+    if login_clicked:
+        if not email or not password:
+            st.warning("Debes ingresar correo y contraseña de EcomExperts.")
         else:
-            st.error("Usuario o contraseña incorrectos.")
-
-if __name__ == "__main__":
-    main()
+            try:
+                with st.spinner("Validando credenciales con EcomExperts..."):
+                    session = login_session(email, password)
+                st.session_state["authenticated"] = True
+                st.session_state["ecom_session"] = session
+                st.session_state["ecom_email"] = email
+                st.success("Acceso concedido")
+                st.rerun()
+            except Exception as e:
+                st.session_state["authenticated"] = False
+                st.session_state["ecom_session"] = None
+                st.error(f"No fue posible validar las credenciales: {e}")
