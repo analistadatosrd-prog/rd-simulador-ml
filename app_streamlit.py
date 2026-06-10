@@ -229,6 +229,7 @@ def mostrar_comparativo(producto, sim, escenario="1", nombre_campania=""):
     card_style = "border:1px solid #444;border-radius:6px;padding:10px;margin-bottom:10px;background-color:#111;"
     value_green_style = "color:#00c853;font-weight:bold;font-size:1.1rem;"
 
+    # ACTUAL
     with col_actual:
         st.markdown("**ACTUAL**")
         ca1, ca2, ca3 = st.columns(3)
@@ -282,6 +283,7 @@ def mostrar_comparativo(producto, sim, escenario="1", nombre_campania=""):
         """
         st.markdown(html_actual, unsafe_allow_html=True)
 
+    # SIMULADO
     with col_sim:
         st.markdown("**SIMULADO**")
         cs1, cs2, cs3 = st.columns(3)
@@ -324,7 +326,7 @@ def mostrar_comparativo(producto, sim, escenario="1", nombre_campania=""):
             </tr>
             <tr>
               <td>Costo und vendida:</td><td>{fmt(sim['costo_und_vendida_sim'])}</td>
-              <td>Campaña cuotas:</td><td>{nombre_campania or 'Sin cuotas'}}</td>
+              <td>Campaña cuotas:</td><td>{nombre_campania or 'Sin cuotas'}</td>
             </tr>
             <tr>
               <td>IVA:</td><td>{fmt(sim['valor_iva_sim'])}</td>
@@ -372,7 +374,7 @@ def apply_filtros(df: pd.DataFrame) -> pd.DataFrame:
     if f_sku.strip():
         vista = vista[vista["sku_asociados"].astype(str).str.contains(f_sku.strip(), case=False, na=False)]
     if f_ml_sinc.strip():
-        vista = vista[vista["ml_id_sincronizados"].astype(str).astype(str).str.contains(f_ml_sinc.strip(), case=False, na=False)]
+        vista = vista[vista["ml_id_sincronizados"].astype(str).str.contains(f_ml_sinc.strip(), case=False, na=False)]
     if f_estado != "Todos":
         vista = vista[vista["estado_meli"] == f_estado]
     if f_tipo != "Todos":
@@ -403,7 +405,7 @@ if not st.session_state.get("authenticated"):
 st.markdown("### RD Simulador | Usuario autenticado via EcomExperts")
 st.markdown("---")
 
-# ── OPCIONES LISTAS (para filtros) ───────────────────────────────────────────
+# OPCIONES LISTAS (para filtros)
 opciones = fetch_all("""
     SELECT
         array_agg(DISTINCT estado_meli)       AS estados,
@@ -416,7 +418,7 @@ estados    = sorted([x for x in (opciones[0]["estados"]    or []) if x])
 logisticas = sorted([x for x in (opciones[0]["logisticas"] or []) if x])
 tipos      = sorted([x for x in (opciones[0]["tipos"]      or []) if x])
 
-# ── BOTÓN CONSULTAR (ACTUALIZA TODO) ─────────────────────────────────────────
+# BOTÓN CONSULTAR (ACTUALIZA TODO)
 col_consultar, _ = st.columns([1, 3])
 with col_consultar:
     btn_consultar = st.button("Consultar datos", type="primary", use_container_width=True)
@@ -430,14 +432,10 @@ if btn_consultar:
     progress_bar = st.progress(0.0)
     status_text  = st.empty()
 
-    # aproximamos número de páginas (no hay endpoint para contar, pero no importa el valor exacto)
-    total_pages_est = 150  
-
-    # Hook de estado que actualiza la barra
+    total_pages_est = 150
     current_page = {"val": 0}
 
     def status_callback(msg: str):
-        # esperamos mensajes como "Consultando mlListings - página X..."
         if "mlListings - página" in msg:
             try:
                 num = int(msg.split("página")[1].split("...")[0].strip())
@@ -451,7 +449,6 @@ if btn_consultar:
         df_products = fetch_products_fast(session, None)
         detalle_costos, final_costos = build_outputs(df_listings, df_products, None)
 
-        # Traer toda la tabla de rentas (sin filtros)
         resultados_pg = fetch_all("SELECT * FROM rd_tabla_rentas", ())
 
         if resultados_pg:
@@ -478,7 +475,7 @@ if btn_consultar:
     status_text.empty()
     st.success("Datos actualizados correctamente desde EcomExperts y Postgres.")
 
-# ── FILTROS ───────────────────────────────────────────────────────────────────
+# FILTROS
 st.markdown("### Filtros sobre datos cargados")
 st.caption("Primero pulsa 'Consultar datos'. Luego aplica filtros sin volver a llamar a Ecom ni a Postgres.")
 
@@ -514,7 +511,7 @@ if btn_filtrar:
         st.session_state.pop("sim_e1_params", None)
         st.session_state.pop("sim_e2_params", None)
 
-# ── TABLA RESULTADOS (FILTRADOS) ─────────────────────────────────────────────
+# TABLA RESULTADOS (FILTRADOS)
 df_vista = st.session_state.df_filtrado
 
 if not df_vista.empty:
@@ -596,7 +593,6 @@ if not df_vista.empty:
 
     st.markdown("---")
 
-    # ── SIMULACIÓN ────────────────────────────────────────────────────────────
     if st.session_state.seleccionados:
         st.markdown(f"## Simulacion de {len(st.session_state.seleccionados)} publicacion(es)")
 
