@@ -71,11 +71,7 @@ def login_ecom():
     email = st.text_input("Correo EcomExperts", key="ecom_email_input")
     password = st.text_input("Contraseña EcomExperts", type="password", key="ecom_password_input")
 
-    col1, col2 = st.columns(2)
-    with col1:
-        login_clicked = st.button("Ingresar", use_container_width=True, key="btn_login_ecom")
-    with col2:
-        logout_clicked = st.button("Salir", use_container_width=True, key="btn_logout_ecom")
+    login_clicked = st.button("Ingresar", use_container_width=True, key="btn_login_ecom")
 
     # Logout: limpiar estado y recargar
     if logout_clicked:
