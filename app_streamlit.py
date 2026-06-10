@@ -363,7 +363,7 @@ for key, default in [
         st.session_state[key] = default
 
 
-def apply_filtros(df: pd.DataFrame) -> pd.DataFrame:
+def apply_filtros(df: pd.DataFrame, f_ml_id, f_titulo, f_sku, f_ml_sinc, f_estado, f_tipo, f_logistica, f_envio) -> pd.DataFrame:
     if df.empty:
         return df
     vista = df.copy()
@@ -373,7 +373,7 @@ def apply_filtros(df: pd.DataFrame) -> pd.DataFrame:
         vista = vista[vista["titulo_ecom"].astype(str).str.contains(f_titulo.strip(), case=False, na=False)]
     if f_sku.strip():
         vista = vista[vista["sku_asociados"].astype(str).str.contains(f_sku.strip(), case=False, na=False)]
-    if f_ml_sinc.strip():
+    if f_ml_sinc.strip() and "ml_id_sincronizados" in vista.columns:
         vista = vista[vista["ml_id_sincronizados"].astype(str).str.contains(f_ml_sinc.strip(), case=False, na=False)]
     if f_estado != "Todos":
         vista = vista[vista["estado_meli"] == f_estado]
@@ -386,15 +386,6 @@ def apply_filtros(df: pd.DataFrame) -> pd.DataFrame:
     elif f_envio == "No":
         vista = vista[vista["envio_gratis"] == False]
     return vista
-
-
-def update_status_bar(current_page, total_pages, progress_bar, status_text):
-    if total_pages > 0:
-        value = min(current_page / total_pages, 1.0)
-    else:
-        value = 0.0
-    progress_bar.progress(value)
-    status_text.text(f"Cargando datos desde EcomExperts... página {current_page}/{total_pages}")
 
 
 # ───────────────────────── LOGIN CON ECOM ────────────────────────────────────
@@ -429,18 +420,18 @@ if btn_consultar:
         st.error("La sesión de EcomExperts no es válida. Vuelve a iniciar sesión.")
         st.stop()
 
-    progress_bar = st.progress(0.0)
+    progress_bar = st.progress(0)
     status_text  = st.empty()
-
-    total_pages_est = 150
-    current_page = {"val": 0}
+    EST_MAX_PAGES = 200  # máximo estimado para normalizar 0–100 %
 
     def status_callback(msg: str):
+        # Mensajes tipo: "Consultando mlListings - página X..."
         if "mlListings - página" in msg:
             try:
                 num = int(msg.split("página")[1].split("...")[0].strip())
-                current_page["val"] = num
-                update_status_bar(num, total_pages_est, progress_bar, status_text)
+                pct = min(int(num / EST_MAX_PAGES * 100), 100)
+                progress_bar.progress(pct)
+                status_text.text(f"Cargando datos desde EcomExperts... página {num} ({pct}%)")
             except Exception:
                 pass
 
@@ -471,8 +462,8 @@ if btn_consultar:
             st.session_state.df_filtrado = pd.DataFrame()
             st.session_state.seleccionados = []
 
-    progress_bar.empty()
-    status_text.empty()
+    progress_bar.progress(100)
+    status_text.text("Carga completada (100%)")
     st.success("Datos actualizados correctamente desde EcomExperts y Postgres.")
 
 # FILTROS
@@ -503,7 +494,10 @@ if btn_filtrar:
     if st.session_state.df_base.empty:
         st.warning("Primero pulsa 'Consultar datos' para cargar la información.")
     else:
-        df_vista = apply_filtros(st.session_state.df_base)
+        df_vista = apply_filtros(
+            st.session_state.df_base,
+            f_ml_id, f_titulo, f_sku, f_ml_sinc, f_estado, f_tipo, f_logistica, f_envio
+        )
         if limite:
             df_vista = df_vista.head(limite)
         st.session_state.df_filtrado = df_vista.copy()
