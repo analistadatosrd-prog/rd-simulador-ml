@@ -73,14 +73,6 @@ def login_ecom():
 
     login_clicked = st.button("Ingresar", use_container_width=True, key="btn_login_ecom")
 
-    # Logout: limpiar estado y recargar
-    if logout_clicked:
-        for k in ["authenticated", "ecom_session", "ecom_email"]:
-            if k in st.session_state:
-                st.session_state.pop(k)
-        st.success("Sesión cerrada")
-        st.experimental_rerun()
-
     # Login
     if login_clicked:
         if not email or not password:
