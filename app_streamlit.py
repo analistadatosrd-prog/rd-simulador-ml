@@ -1,7 +1,10 @@
-
+import streamlit as st
+import psycopg2
 import psycopg2.extras
 import pandas as pd
 from passlib.context import CryptContext
+
+from login_streamlit import login_ecom
 
 st.set_page_config(
     page_title="RD Simulador - Mercado Libre",
@@ -19,8 +22,11 @@ pwd_context  = CryptContext(
     truncate_error=True,
 )
 
+
+# ─────────────────────── CONEXIÓN A POSTGRES ────────────────────────────────
 def get_conn():
     return psycopg2.connect(DATABASE_URL)
+
 
 def fetch_all(query, params=None):
     conn = get_conn()
@@ -30,6 +36,7 @@ def fetch_all(query, params=None):
             return [dict(r) for r in cur.fetchall()]
     finally:
         conn.close()
+
 
 def fetch_one(query, params=None):
     conn = get_conn()
@@ -41,6 +48,7 @@ def fetch_one(query, params=None):
     finally:
         conn.close()
 
+
 def execute(query, params=None):
     conn = get_conn()
     try:
@@ -49,6 +57,7 @@ def execute(query, params=None):
         conn.commit()
     finally:
         conn.close()
+
 
 def login(username, password):
     user = fetch_one(
@@ -61,6 +70,7 @@ def login(username, password):
         return None
     return user
 
+
 CAMPAIGN_CUOTAS = {
     "Sin cuotas": 0.0000,
     "3 cuotas":   0.0840,
@@ -69,8 +79,8 @@ CAMPAIGN_CUOTAS = {
     "12 cuotas":  0.1920,
 }
 
-# --- CLASIFICACIÓN DE RANGOS (COINCIDE CON rd_tabla_costos) ------------------
 
+# ───────────────── CLASIFICACIÓN DE RANGOS COSTO/ENVÍO ──────────────────────
 def clasificar_rango_envio(precio):
     if precio <= 32999:
         return "Hasta $32.999"
@@ -78,6 +88,7 @@ def clasificar_rango_envio(precio):
         return "De $ 33.000 a $ 49.999"
     else:
         return "Más de $ 50.000"
+
 
 def clasificar_rango_und(precio):
     if precio <= 15999:
@@ -89,7 +100,6 @@ def clasificar_rango_und(precio):
     else:
         return "No Aplica"
 
-# --- LOOKUPS SEPARADOS EN rd_tabla_costos ------------------------------------
 
 def lookup_costo_und(rango_peso, rango_und):
     """
@@ -108,6 +118,7 @@ def lookup_costo_und(rango_peso, rango_und):
         return 0.0
     return float(row.get("Costo_por_unidad_vendida") or 0)
 
+
 def lookup_costo_envio(rango_peso, rango_envio):
     """
     Devuelve costo_envio usando:
@@ -125,8 +136,8 @@ def lookup_costo_envio(rango_peso, rango_envio):
         return 0.0
     return float(row.get("costo_envio") or 0)
 
-# --- LÓGICA DE RENTABILIDAD ---------------------------------------------------
 
+# ───────────────────────── LÓGICA DE RENTABILIDAD ───────────────────────────
 def calcular_rentabilidad(producto, precio_sim, pct_cuotas, incluir_envio: bool):
     """
     precio_sim: precio final simulado, YA incluye IVA.
@@ -196,6 +207,7 @@ def calcular_rentabilidad(producto, precio_sim, pct_cuotas, incluir_envio: bool)
         "rango_und_sim":           rango_und,
     }
 
+
 def simular_escenario_2(producto, pct_obj, pct_cuotas, incluir_envio: bool):
     costo_fijo = float(producto.get("costo_fijo_ecom") or 0)
     rent_obj   = (pct_obj / 100) * costo_fijo
@@ -222,11 +234,13 @@ def simular_escenario_2(producto, pct_obj, pct_cuotas, incluir_envio: bool):
 
     return round(p_mid, 2)
 
+
 def fmt(valor):
     try:
         return f"$ {float(valor):,.0f}".replace(",", ".")
     except:
         return "-"
+
 
 def mostrar_comparativo(producto, sim, escenario="1", nombre_campania=""):
     pct_actual = float(producto.get("pct_rentabilidad") or 0) * 100
@@ -368,75 +382,24 @@ def mostrar_comparativo(producto, sim, escenario="1", nombre_campania=""):
         else:
             st.error(f"📉 Variacion % Rentabilidad: {diff_pct:.2f}%")
 
-# ── SESSION STATE ─────────────────────────────────────────────────────────────
+
+# ───────────────────────── SESSION STATE BASE ────────────────────────────────
 for key, default in [
-    ("logged_in", False),
-    ("user", None),
-    ("show_pwd", False),
     ("resultados", None),
     ("seleccionados", []),
 ]:
     if key not in st.session_state:
         st.session_state[key] = default
 
-# ── LOGIN ─────────────────────────────────────────────────────────────────────
-if not st.session_state.logged_in:
-    col1, col2, col3 = st.columns([1, 1.2, 1])
-    with col2:
-        st.markdown("## RD Simulador")
-        st.markdown("**Mercado Libre - Simulador de Rentabilidad**")
-        st.markdown("---")
-        username = st.text_input("Usuario")
-        password = st.text_input("Contrasena", type="password")
-        if st.button("Ingresar", use_container_width=True, key="btn_login"):
-            user = login(username, password)
-            if user:
-                st.session_state.logged_in = True
-                st.session_state.user = user
-                st.rerun()
-            else:
-                st.error("Usuario o contrasena incorrectos")
+
+# ───────────────────────── LOGIN CON ECOM ────────────────────────────────────
+if not st.session_state.get("authenticated"):
+    login_ecom()
     st.stop()
 
-# ── APP PRINCIPAL ─────────────────────────────────────────────────────────────
-st.markdown(f"### RD Simulador | Usuario: {st.session_state.user['username']}")
 
-col_logout, col_pwd, col_space = st.columns([1, 1, 6])
-with col_logout:
-    if st.button("Salir", key="btn_salir"):
-        st.session_state.logged_in = False
-        st.session_state.user = None
-        st.session_state.resultados = None
-        st.session_state.seleccionados = []
-        st.session_state.pop("sim_e1_params", None)
-        st.session_state.pop("sim_e2_params", None)
-        st.rerun()
-with col_pwd:
-    if st.button("Cambiar contrasena", key="btn_cambiar_pwd"):
-        st.session_state.show_pwd = not st.session_state.show_pwd
-
-if st.session_state.show_pwd:
-    with st.expander("Cambiar contrasena", expanded=True):
-        old_pwd = st.text_input("Contrasena actual", type="password", key="old_pwd")
-        new_pwd = st.text_input("Nueva contrasena",  type="password", key="new_pwd")
-        con_pwd = st.text_input("Confirmar nueva",   type="password", key="con_pwd")
-        if st.button("Actualizar contrasena", key="btn_actualizar_pwd"):
-            if new_pwd != con_pwd:
-                st.error("Las contrasenas nuevas no coinciden")
-            elif len(new_pwd) < 6:
-                st.error("La nueva contrasena debe tener al menos 6 caracteres")
-            else:
-                user = login(st.session_state.user["username"], old_pwd)
-                if not user:
-                    st.error("Contrasena actual incorrecta")
-                else:
-                    new_hash = pwd_context.hash(new_pwd)
-                    execute(
-                        "UPDATE rd_usuarios SET password_hash = %s WHERE username = %s",
-                        (new_hash, st.session_state.user["username"])
-                    )
-                    st.success("Contrasena actualizada")
-                    st.session_state.show_pwd = False
+# ───────────────────────── APP PRINCIPAL ─────────────────────────────────────
+st.markdown("### RD Simulador | Usuario autenticado via EcomExperts")
 
 st.markdown("---")
 
@@ -579,11 +542,11 @@ if st.session_state.resultados is not None:
         with col_sel_all:
             if st.button("Seleccionar todas", key="btn_sel_all"):
                 st.session_state.seleccionados = [str(r["ml_id"]) for r in resultados]
-                st.rerun()
+                st.experimental_rerun()
         with col_des_all:
             if st.button("Deseleccionar todas", key="btn_des_all"):
                 st.session_state.seleccionados = []
-                st.rerun()
+                st.experimental_rerun()
 
         seleccion = st.multiselect(
             "Publicaciones a simular",
@@ -609,7 +572,7 @@ if st.session_state.resultados is not None:
 
             col_e1, col_e2 = st.columns(2)
 
-            # ── ESCENARIO 1 ---------------------------------------------------
+            # ESCENARIO 1
             with col_e1:
                 st.markdown("**Escenario 1: Cambio de precio**")
                 with st.form(key="form_e1"):
@@ -640,7 +603,7 @@ if st.session_state.resultados is not None:
                         }
                         st.session_state.pop("sim_e2_params", None)
 
-            # ── ESCENARIO 2 ---------------------------------------------------
+            # ESCENARIO 2
             with col_e2:
                 st.markdown("**Escenario 2: Rentabilidad objetivo**")
                 with st.form(key="form_e2"):
@@ -669,7 +632,7 @@ if st.session_state.resultados is not None:
                     }
                     st.session_state.pop("sim_e1_params", None)
 
-            # ── RESULTADOS ESCENARIO 1 ────────────────────────────────────────
+            # RESULTADOS ESCENARIO 1
             if "sim_e1_params" in st.session_state:
                 p = st.session_state["sim_e1_params"]
                 st.markdown("### Resultados Escenario 1")
@@ -686,7 +649,7 @@ if st.session_state.resultados is not None:
                     with st.expander(f"{producto['titulo_ecom']} | ML: {ml_id}", expanded=True):
                         mostrar_comparativo(producto, sim, escenario="1", nombre_campania=p["campaign"])
 
-            # ── RESULTADOS ESCENARIO 2 ────────────────────────────────────────
+            # RESULTADOS ESCENARIO 2
             if "sim_e2_params" in st.session_state:
                 p = st.session_state["sim_e2_params"]
                 st.markdown("### Resultados Escenario 2")
