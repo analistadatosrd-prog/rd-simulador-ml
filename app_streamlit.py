@@ -2,13 +2,11 @@ import streamlit as st
 import psycopg2
 import psycopg2.extras
 import pandas as pd
-from passlib.context import CryptContext
+from login_streamlit import login_ecom
 
-st.set_page_config(
-    page_title="RD Simulador - Mercado Libre",
-    page_icon="📊",
-    layout="wide"
-)
+if not st.session_state.get("authenticated"):
+    login_ecom()
+    st.stop()
 
 # Para despliegue en Streamlit Cloud conviene leer esto de st.secrets["DATABASE_URL"]
 DATABASE_URL = st.secrets["DATABASE_URL"]
