@@ -127,7 +127,7 @@ def lookup_costo_envio(rango_peso, rango_envio):
 
 # ───────────────────────── LÓGICA DE RENTABILIDAD ───────────────────────────
 def calcular_rentabilidad(producto, precio_sim, pct_cuotas, incluir_envio: bool):
-    costo_fijo   = float(producto.get("costo_fijo_ecom") or 0)  # ya es el final (nuevo si hay)
+    costo_fijo   = float(producto.get("costo_fijo_ecom") or 0)  # final (nuevo si hay)
     pct_venta    = float(producto.get("pct_costo_venta") or 0)
     iva_tasa     = float(producto.get("iva_venta") or 0)
     rango_peso   = producto.get("rango_peso_facturable")
@@ -400,6 +400,20 @@ if not st.session_state.get("authenticated"):
 st.markdown("### RD Simulador | Usuario autenticado via EcomExperts")
 st.markdown("---")
 
+# Carga inicial solo desde Postgres (sin Ecom) si df_base está vacío
+if st.session_state.df_base.empty:
+    resultados_pg = fetch_all("SELECT * FROM rd_tabla_rentas", ())
+    if resultados_pg:
+        df_pg = pd.DataFrame(resultados_pg)
+        # Inicialmente: antiguo = costo_fijo actual, nuevo vacío
+        df_pg["costo_fijo_ecom_antiguo"] = df_pg["costo_fijo_ecom"]
+        df_pg["costo_fijo_ecom_nuevo"] = pd.NA
+        st.session_state.df_base = df_pg.copy()
+        st.session_state.df_filtrado = df_pg.copy()
+    else:
+        st.session_state.df_base = pd.DataFrame()
+        st.session_state.df_filtrado = pd.DataFrame()
+
 # OPCIONES LISTAS (para filtros)
 opciones = fetch_all("""
     SELECT
@@ -413,10 +427,10 @@ estados    = sorted([x for x in (opciones[0]["estados"]    or []) if x])
 logisticas = sorted([x for x in (opciones[0]["logisticas"] or []) if x])
 tipos      = sorted([x for x in (opciones[0]["tipos"]      or []) if x])
 
-# BOTÓN CONSULTAR (ACTUALIZA TODO)
+# BOTÓN CONSULTAR (ACTUALIZAR COSTOS CON ECOM)
 col_consultar, _ = st.columns([1, 3])
 with col_consultar:
-    btn_consultar = st.button("Consultar datos", type="primary", use_container_width=True)
+    btn_consultar = st.button("Consultar datos (actualizar costos Ecom)", type="primary", use_container_width=True)
 
 if btn_consultar:
     session = st.session_state.get("ecom_session")
@@ -438,30 +452,29 @@ if btn_consultar:
             except Exception:
                 pass
 
-    with st.spinner("Consultando información completa desde EcomExperts y Postgres..."):
+    with st.spinner("Actualizando costos desde EcomExperts..."):
         df_listings = fetch_ml_listings_fast(session, status_callback)
         df_products = fetch_products_fast(session, None)
         detalle_costos, final_costos = build_outputs(df_listings, df_products, None)
 
-        resultados_pg = fetch_all("SELECT * FROM rd_tabla_rentas", ())
-
-        if resultados_pg:
-            df_pg = pd.DataFrame(resultados_pg)
-
-            # Guardar costo fijo original de Postgres
-            df_pg["costo_fijo_ecom_antiguo"] = df_pg["costo_fijo_ecom"]
-
-            # Costo nuevo desde Ecom (costo_total_mla)
+        # Tomamos el df_base actual como punto de partida
+        df_pg = st.session_state.df_base.copy()
+        if not df_pg.empty:
             df_costos = final_costos[["mla", "costo_total_mla"]].rename(
                 columns={"mla": "ml_id", "costo_total_mla": "costo_fijo_ecom_nuevo"}
             )
-
             df_pg["ml_id"] = df_pg["ml_id"].astype(str)
             df_costos["ml_id"] = df_costos["ml_id"].astype(str)
 
-            df_merged = df_pg.merge(df_costos, on="ml_id", how="left")
+            df_merged = df_pg.merge(df_costos, on="ml_id", how="left", suffixes=("", "_ecom"))
 
-            # Costo final que usará la app: nuevo si existe, si no el antiguo
+            # Si hay costo nuevo desde Ecom, lo actualizamos en la columna nuevo
+            df_merged["costo_fijo_ecom_nuevo"] = df_merged["costo_fijo_ecom_nuevo_ecom"].fillna(
+                df_merged["costo_fijo_ecom_nuevo"]
+            )
+            df_merged.drop(columns=["costo_fijo_ecom_nuevo_ecom"], inplace=True)
+
+            # Recalcular costo_fijo_ecom final
             df_merged["costo_fijo_ecom"] = df_merged["costo_fijo_ecom_nuevo"].fillna(
                 df_merged["costo_fijo_ecom_antiguo"]
             )
@@ -471,18 +484,14 @@ if btn_consultar:
             st.session_state.seleccionados = []
             st.session_state.pop("sim_e1_params", None)
             st.session_state.pop("sim_e2_params", None)
-        else:
-            st.session_state.df_base = pd.DataFrame()
-            st.session_state.df_filtrado = pd.DataFrame()
-            st.session_state.seleccionados = []
 
     progress_bar.progress(100)
-    status_text.text("Carga completada (100%)")
-    st.success("Datos actualizados correctamente desde EcomExperts y Postgres.")
+    status_text.text("Actualización completada (100%)")
+    st.success("Costos actualizados correctamente desde EcomExperts.")
 
 # FILTROS
 st.markdown("### Filtros sobre datos cargados")
-st.caption("Primero pulsa 'Consultar datos'. Luego aplica filtros sin volver a llamar a Ecom ni a Postgres.")
+st.caption("Puedes usar la información de Postgres tal cual, o actualizar costos con el botón anterior.")
 
 col1, col2, col3, col4 = st.columns(4)
 with col1:
@@ -506,7 +515,7 @@ with col_lim:
 
 if btn_filtrar:
     if st.session_state.df_base.empty:
-        st.warning("Primero pulsa 'Consultar datos' para cargar la información.")
+        st.warning("No hay datos cargados desde Postgres.")
     else:
         df_vista = apply_filtros(
             st.session_state.df_base,
