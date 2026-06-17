@@ -127,7 +127,7 @@ def lookup_costo_envio(rango_peso, rango_envio):
 
 # ───────────────────────── LÓGICA DE RENTABILIDAD ───────────────────────────
 def calcular_rentabilidad(producto, precio_sim, pct_cuotas, incluir_envio: bool):
-    costo_fijo   = float(producto.get("costo_fijo_ecom") or 0)  # final (nuevo si hay)
+    costo_fijo   = float(producto.get("costo_fijo_ecom") or 0)
     pct_venta    = float(producto.get("pct_costo_venta") or 0)
     iva_tasa     = float(producto.get("iva_venta") or 0)
     rango_peso   = producto.get("rango_peso_facturable")
@@ -229,7 +229,6 @@ def mostrar_comparativo(producto, sim, escenario="1", nombre_campania=""):
     card_style = "border:1px solid #444;border-radius:6px;padding:10px;margin-bottom:10px;background-color:#111;"
     value_green_style = "color:#00c853;font-weight:bold;font-size:1.1rem;"
 
-    # ACTUAL
     with col_actual:
         st.markdown("**ACTUAL**")
         ca1, ca2, ca3 = st.columns(3)
@@ -287,7 +286,6 @@ def mostrar_comparativo(producto, sim, escenario="1", nombre_campania=""):
         """
         st.markdown(html_actual, unsafe_allow_html=True)
 
-    # SIMULADO
     with col_sim:
         st.markdown("**SIMULADO**")
         cs1, cs2, cs3 = st.columns(3)
@@ -357,7 +355,6 @@ def mostrar_comparativo(producto, sim, escenario="1", nombre_campania=""):
             st.error(f"📉 Variacion % Rentabilidad: {diff_pct:.2f}%")
 
 
-# ───────────────────────── SESSION / ESTADO ──────────────────────────────────
 for key, default in [
     ("df_base", pd.DataFrame()),
     ("df_filtrado", pd.DataFrame()),
@@ -376,7 +373,7 @@ def apply_filtros(df: pd.DataFrame, f_ml_id, f_titulo, f_sku, f_ml_sinc, f_estad
     if f_titulo.strip():
         vista = vista[vista["titulo_ecom"].astype(str).str.contains(f_titulo.strip(), case=False, na=False)]
     if f_sku.strip():
-        vista = vista[vista["sku_asociados"].astype(str).str.contains(f_sku.strip(), case=False, na=False)]
+        vista = vista[vista["sku"].astype(str).str.contains(f_sku.strip(), case=False, na=False)]
     if f_ml_sinc.strip() and "ml_id_sincronizados" in vista.columns:
         vista = vista[vista["ml_id_sincronizados"].astype(str).str.contains(f_ml_sinc.strip(), case=False, na=False)]
     if f_estado != "Todos":
@@ -392,7 +389,6 @@ def apply_filtros(df: pd.DataFrame, f_ml_id, f_titulo, f_sku, f_ml_sinc, f_estad
     return vista
 
 
-# ───────────────────────── LOGIN CON ECOM ────────────────────────────────────
 if not st.session_state.get("authenticated"):
     login_ecom()
     st.stop()
@@ -400,12 +396,10 @@ if not st.session_state.get("authenticated"):
 st.markdown("### RD Simulador | Usuario autenticado via EcomExperts")
 st.markdown("---")
 
-# Carga inicial solo desde Postgres (sin Ecom) si df_base está vacío
 if st.session_state.df_base.empty:
     resultados_pg = fetch_all("SELECT * FROM rd_tabla_rentas", ())
     if resultados_pg:
         df_pg = pd.DataFrame(resultados_pg)
-        # Inicialmente: antiguo = costo_fijo actual, nuevo vacío
         df_pg["costo_fijo_ecom_antiguo"] = df_pg["costo_fijo_ecom"]
         df_pg["costo_fijo_ecom_nuevo"] = pd.NA
         st.session_state.df_base = df_pg.copy()
@@ -414,7 +408,6 @@ if st.session_state.df_base.empty:
         st.session_state.df_base = pd.DataFrame()
         st.session_state.df_filtrado = pd.DataFrame()
 
-# OPCIONES LISTAS (para filtros)
 opciones = fetch_all("""
     SELECT
         array_agg(DISTINCT estado_meli)       AS estados,
@@ -427,7 +420,6 @@ estados    = sorted([x for x in (opciones[0]["estados"]    or []) if x])
 logisticas = sorted([x for x in (opciones[0]["logisticas"] or []) if x])
 tipos      = sorted([x for x in (opciones[0]["tipos"]      or []) if x])
 
-# BOTÓN CONSULTAR (ACTUALIZAR COSTOS CON ECOM)
 col_consultar, _ = st.columns([1, 3])
 with col_consultar:
     btn_consultar = st.button("Consultar datos (actualizar costos Ecom)", type="primary", use_container_width=True)
@@ -440,7 +432,7 @@ if btn_consultar:
 
     progress_bar = st.progress(0)
     status_text  = st.empty()
-    EST_MAX_PAGES = 200  # máximo estimado para normalizar 0–100 %
+    EST_MAX_PAGES = 200
 
     def status_callback(msg: str):
         if "mlListings - página" in msg:
@@ -457,7 +449,6 @@ if btn_consultar:
         df_products = fetch_products_fast(session, None)
         detalle_costos, final_costos = build_outputs(df_listings, df_products, None)
 
-        # Tomamos el df_base actual como punto de partida
         df_pg = st.session_state.df_base.copy()
         if not df_pg.empty:
             df_costos = final_costos[["mla", "costo_total_mla"]].rename(
@@ -468,13 +459,11 @@ if btn_consultar:
 
             df_merged = df_pg.merge(df_costos, on="ml_id", how="left", suffixes=("", "_ecom"))
 
-            # Si hay costo nuevo desde Ecom, lo actualizamos en la columna nuevo
             df_merged["costo_fijo_ecom_nuevo"] = df_merged["costo_fijo_ecom_nuevo_ecom"].fillna(
                 df_merged["costo_fijo_ecom_nuevo"]
             )
             df_merged.drop(columns=["costo_fijo_ecom_nuevo_ecom"], inplace=True)
 
-            # Recalcular costo_fijo_ecom final
             df_merged["costo_fijo_ecom"] = df_merged["costo_fijo_ecom_nuevo"].fillna(
                 df_merged["costo_fijo_ecom_antiguo"]
             )
@@ -489,7 +478,6 @@ if btn_consultar:
     status_text.text("Actualización completada (100%)")
     st.success("Costos actualizados correctamente desde EcomExperts.")
 
-# FILTROS
 st.markdown("### Filtros sobre datos cargados")
 st.caption("Puedes usar la información de Postgres tal cual, o actualizar costos con el botón anterior.")
 
@@ -528,7 +516,6 @@ if btn_filtrar:
         st.session_state.pop("sim_e1_params", None)
         st.session_state.pop("sim_e2_params", None)
 
-# TABLA RESULTADOS (FILTRADOS)
 df_vista = st.session_state.df_filtrado
 
 if not df_vista.empty:
@@ -536,7 +523,7 @@ if not df_vista.empty:
     st.markdown("---")
 
     df_show = df_vista.copy()
-    cols_inicio = ["ml_id", "titulo_ecom", "sku_asociados"]
+    cols_inicio = ["ml_id", "titulo_ecom", "sku"]
     otras_cols  = [c for c in df_show.columns if c not in cols_inicio]
     df_show = df_show[cols_inicio + otras_cols]
 
@@ -565,7 +552,7 @@ if not df_vista.empty:
         column_config={
             "ml_id":                     st.column_config.TextColumn("ML ID",        width="medium"),
             "titulo_ecom":               st.column_config.TextColumn("Titulo",       width="large"),
-            "sku_asociados":             st.column_config.TextColumn("SKU",          width="medium"),
+            "sku":                       st.column_config.TextColumn("SKU",          width="medium"),
             "estado_meli":               st.column_config.TextColumn("Estado",       width="small"),
             "tipo_publicacion":          st.column_config.TextColumn("Tipo",         width="medium"),
             "logistica":                 st.column_config.TextColumn("Logistica",    width="medium"),
@@ -597,7 +584,7 @@ if not df_vista.empty:
         "Publicaciones a simular",
         options=[str(r["ml_id"]) for r in resultados_vista],
         format_func=lambda x: next(
-            (f"{r['ml_id']} | {str(r['titulo_ecom'])[:60]} | {fmt(r['precio_venta_final'])}"
+            (f"{r['ml_id']} | {str(r['titulo_ecom'])[:60]} | {str(r.get('sku', ''))} | {fmt(r['precio_venta_final'])}"
              for r in resultados_vista if str(r["ml_id"]) == x),
             x
         ),
@@ -617,7 +604,6 @@ if not df_vista.empty:
 
         col_e1, col_e2 = st.columns(2)
 
-        # ESCENARIO 1
         with col_e1:
             st.markdown("**Escenario 1: Cambio de precio**")
             with st.form(key="form_e1"):
@@ -648,7 +634,6 @@ if not df_vista.empty:
                     }
                     st.session_state.pop("sim_e2_params", None)
 
-        # ESCENARIO 2
         with col_e2:
             st.markdown("**Escenario 2: Rentabilidad objetivo**")
             with st.form(key="form_e2"):
@@ -677,7 +662,6 @@ if not df_vista.empty:
                 }
                 st.session_state.pop("sim_e1_params", None)
 
-        # RESULTADOS ESCENARIO 1
         if "sim_e1_params" in st.session_state:
             p = st.session_state["sim_e1_params"]
             st.markdown("### Resultados Escenario 1")
@@ -695,7 +679,6 @@ if not df_vista.empty:
                 with st.expander(f"{producto['titulo_ecom']} | ML: {ml_id}", expanded=True):
                     mostrar_comparativo(producto, sim, escenario="1", nombre_campania=p["campaign"])
 
-        # RESULTADOS ESCENARIO 2
         if "sim_e2_params" in st.session_state:
             p = st.session_state["sim_e2_params"]
             st.markdown("### Resultados Escenario 2")
